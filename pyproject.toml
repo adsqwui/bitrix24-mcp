@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bitrix24-mcp"
+version = "0.1.0"
+description = "Secure MCP server for any Bitrix24 portal: tasks, checklists, comments, files, chats"
+requires-python = ">=3.12"
+license = "MIT"
+readme = "README.md"
+dependencies = ["httpx>=0.27,<1", "mcp>=1,<2", "pydantic>=2,<3", "uvicorn>=0.30,<1"]
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24", "asgi-lifespan>=2,<3"]
+[project.scripts]
+bitrix-mcp = "bitrix_mcp.server:main"
+[tool.hatch.build.targets.wheel]
+packages = ["src/bitrix_mcp"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_default_fixture_loop_scope = "function"

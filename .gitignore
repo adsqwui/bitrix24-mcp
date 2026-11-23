@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+var/
+.env
+# local notes about one specific portal setup
+RESUME.md
+STATUS.md
+ACCEPTANCE.md
+.dsh-project-memory/
