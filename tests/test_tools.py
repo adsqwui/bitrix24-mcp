@@ -89,7 +89,8 @@ async def test_task_list_loads_checklists(tmp_path):
     f=F(tmp_path,[rows]);r=await TaskTools(f).task_list()
     a,b=r["tasks"]
     assert a["checklist"]==[{"id":2,"title":"Пункт","done":False,"sort":0,"group_id":1}] and "checklist_unavailable" not in a
-    assert b["checklist"]==[] and b["checklist_unavailable"] is True
+    assert a["checklist_progress"]=="0/1"
+    assert b["checklist"]==[] and b["checklist_unavailable"] is True and b["checklist_progress"] is None
     assert f.calls[-1][1]["t7"]==("task.checklistitem.getlist",{"TASKID":7})
 
 @pytest.mark.asyncio
@@ -218,3 +219,8 @@ async def test_untitled_task_tag_is_not_linked_twice(tmp_path):
         async def batch(self,c,mutation=False):return {"successes":{},"errors":{"t90958":{"code":"X"}}}
     f=F(tmp_path);r=await ExtraTools(f,TaskTools(f)).chat_send("chat1","[TASK=90958]",dry_run=True)
     assert r["message"]==f"[URL={URL_PREFIX}90958/]задача #90958[/URL]"
+
+def test_checklist_progress_counts_done_items():
+    from bitrix_mcp.tasks import checklist_progress
+    items=[{"done":True}]*10+[{"done":False}]*3
+    assert checklist_progress(items)=="10/13" and checklist_progress([]) is None

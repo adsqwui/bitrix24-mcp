@@ -32,6 +32,11 @@ def checklist_view(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
              for r in rows if r.get("ID") and str(r.get("PARENT_ID") or 0) != "0"]
     return {"groups": groups, "items": sorted(items, key=lambda x: (x["group_id"], x["sort"]))}
 
+def checklist_progress(items: list[Any]) -> str | None:
+    # "10/13": done items out of all, None when the task has no checklist.
+    if not items: return None
+    return f"{sum(1 for x in items if isinstance(x, Mapping) and x.get('done'))}/{len(items)}"
+
 def _bool(value: Any) -> bool | None:
     if value in (True, 1, "1", "Y", "y", "true", "TRUE"): return True
     if value in (False, 0, "0", "N", "n", "false", "FALSE"): return False
@@ -134,6 +139,7 @@ class TaskTools:
             start=int(next_value)
         out=[self._task_view(x) for x in rows]
         await self._attach_checklists([t for t in out if not t["checklist"]])
+        for t in out: t["checklist_progress"]=None if t.get("checklist_unavailable") else checklist_progress(t["checklist"])
         return {"tasks":out,"next":next_value,"total":total}
 
     async def _attach_checklists(self, tasks:list[dict[str,Any]])->None:
@@ -170,6 +176,7 @@ class TaskTools:
         if with_checklist and not out["checklist"]:
             try: out["checklist"]=checklist_view(_items(await self.client.call("task.checklistitem.getlist",{"TASKID":task_id})))["items"]
             except AppError: out["checklist_unavailable"]=True
+        if with_checklist: out["checklist_progress"]=None if out.get("checklist_unavailable") else checklist_progress(out["checklist"])
         return out
 
     async def _fields(self, **values:Any)->dict[str,Any]:
