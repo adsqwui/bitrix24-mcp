@@ -121,3 +121,34 @@ async def test_chat_send_by_title_not_found_lists_candidates(tmp_path):
 async def test_chat_send_dialog_id_skips_lookup(tmp_path):
     f=Fake(tmp_path);await ExtraTools(f,TaskTools(f)).chat_send("chat12","x")
     assert [c[0] for c in f.calls]==["im.message.add"]
+
+MEMBERS={"result":[{"id":13030,"first_name":"Полина","last_name":"Смирнова","name":"Полина Смирнова"},{"id":14,"first_name":"Олег","last_name":"Петров","name":"Олег Петров"},{"id":15,"first_name":"Олег","last_name":"Сидоров","name":"Олег Сидоров"},{"id":99,"first_name":"Бот","last_name":"","bot":True}]}
+
+@pytest.mark.asyncio
+async def test_mention_by_first_name_among_chat_members(tmp_path):
+    f=Fake(tmp_path,[MEMBERS,{"result":1}]);await ExtraTools(f,TaskTools(f)).chat_send("chat7","@Полина посмотри, пожалуйста. Почта: a@b.ru")
+    assert f.calls[0]==("im.dialog.users.list",{"DIALOG_ID":"chat7"},False)
+    assert f.calls[1][1]["MESSAGE"]=="[USER=13030]Полина[/USER] посмотри, пожалуйста. Почта: a@b.ru"
+
+@pytest.mark.asyncio
+async def test_mention_full_name_disambiguates(tmp_path):
+    f=Fake(tmp_path,[MEMBERS]);r=await ExtraTools(f,TaskTools(f)).chat_send("chat7","@Олег Сидоров и @Полина, готово",dry_run=True)
+    assert r["message"]=="[USER=15]Олег Сидоров[/USER] и [USER=13030]Полина[/USER], готово" and len(f.calls)==1
+
+@pytest.mark.asyncio
+async def test_mention_ambiguous_first_name_blocks_send(tmp_path):
+    f=Fake(tmp_path,[MEMBERS])
+    with pytest.raises(AppError) as e:await ExtraTools(f,TaskTools(f)).chat_send("chat7","@Олег глянь")
+    assert e.value.code=="USER_AMBIGUOUS" and {c["id"] for c in e.value.details["candidates"]}=={14,15}
+    assert all(c[0]!="im.message.add" for c in f.calls)
+
+@pytest.mark.asyncio
+async def test_mention_outside_chat_falls_back_to_portal_search(tmp_path):
+    users={"result":[{"ID":"77","NAME":"Анна","LAST_NAME":"Белова","ACTIVE":"Y"}]}
+    f=Fake(tmp_path,[MEMBERS,users]);r=await ExtraTools(f,TaskTools(f)).chat_send("chat7","@Анна, привет",dry_run=True)
+    assert r["message"]=="[USER=77]Анна[/USER], привет" and f.calls[1][0]=="user.get"
+
+@pytest.mark.asyncio
+async def test_message_without_at_skips_member_lookup(tmp_path):
+    f=Fake(tmp_path);await ExtraTools(f,TaskTools(f)).chat_send("chat7","без упоминаний")
+    assert [c[0] for c in f.calls]==["im.message.add"]

@@ -9,6 +9,15 @@ import httpx
 from .core import AppError, Client, normalize_date
 from .tasks import TaskTools, _items, checklist_view
 
+# "@Полина" or "@Полина Иванова"; the lookbehind keeps e-mail addresses out.
+MENTION_RE=re.compile(r"(?<![\w.@])@([^\W\d_][\w-]*)(?:[ \t]+([^\W\d_][\w-]*))?")
+
+async def _asub(pattern:re.Pattern[str],text:str,repl)->str:
+    out=[];pos=0
+    for m in pattern.finditer(text):
+        out.append(text[pos:m.start()]);out.append(await repl(m));pos=m.end()
+    return "".join(out)+text[pos:]
+
 class ExtraTools:
     def __init__(self, client:Client, tasks:TaskTools): self.client,self.tasks=client,tasks
     async def checklist_get(self,task_id:int)->dict[str,Any]:
@@ -136,8 +145,39 @@ class ExtraTools:
             candidates=[{"dialog_id":c["dialog_id"],"name":c["name"]} for c in (exact or found)[:10]]
             raise AppError("CHAT_AMBIGUOUS" if exact else "CHAT_NOT_FOUND","Чат с таким названием не найден однозначно; уточните название или передайте dialog_id.",{"candidates":candidates})
         return exact[0]["dialog_id"]
+    async def _members(self,dialog_id:str)->list[dict[str,Any]]:
+        env=await self.client.call("im.dialog.users.list",{"DIALOG_ID":dialog_id})
+        return [{"id":int(u["id"]),"first":str(u.get("first_name") or ""),"last":str(u.get("last_name") or ""),"name":u.get("name")}
+                for u in env.get("result") or [] if isinstance(u,Mapping) and str(u.get("id","")).isdigit() and not u.get("bot")]
+    async def _mentions(self,dialog_id:str,text:str)->str:
+        # Chat members are matched first: "@Полина" there is almost always one person.
+        members:list[dict[str,Any]]|None=None
+        cf=str.casefold
+        async def lookup(name:str,mention:str)->int:
+            try:return await self.tasks.resolve_user(name)
+            except AppError as e:raise AppError(e.code,f"Не удалось однозначно найти {mention}: укажите имя и фамилию или вставьте [USER=id]...[/USER].",e.details) from None
+        async def repl(m:re.Match[str])->str:
+            nonlocal members
+            if members is None:
+                try:members=await self._members(dialog_id)
+                except AppError:members=[]
+            first,second=m.group(1),m.group(2)
+            full=f"{first} {second}" if second and second[0].isupper() else None
+            if full:
+                hit=[u for u in members if cf(full) in {cf(f"{u['first']} {u['last']}"),cf(f"{u['last']} {u['first']}")}]
+                if len(hit)==1:return f"[USER={hit[0]['id']}]{full}[/USER]"
+            tail=m.group(0)[1+len(first):]
+            hit=[u for u in members if cf(first) in {cf(u["first"]),cf(u["last"])}]
+            if len(hit)>1:raise AppError("USER_AMBIGUOUS",f"В чате несколько человек подходят под @{first}; добавьте фамилию.",{"candidates":[{"id":u["id"],"name":u["name"]} for u in hit]})
+            if hit:return f"[USER={hit[0]['id']}]{first}[/USER]"+tail
+            if full:
+                try:return f"[USER={await self.tasks.resolve_user(full)}]{full}[/USER]"
+                except AppError:pass
+            return f"[USER={await lookup(first,'@'+first)}]{first}[/USER]"+tail
+        return await _asub(MENTION_RE,text,repl) if "@" in text else text
     async def chat_send(self,dialog_id:str,message:str,dry_run:bool=False)->dict[str,Any]:
         target=await self._dialog(dialog_id)
+        message=await self._mentions(target,message)
         if dry_run:return {"dry_run":True,"operation":"chat_send","dialog_id":target,"message":message,"task_url":None}
         env=await self.client.call("im.message.add",{"DIALOG_ID":target,"MESSAGE":message},mutation=True);return {"message_id":env.get("result"),"dialog_id":target,"task_url":None}
     async def chat_history(self,dialog_id:str,last_n:int=20,last_id:int|None=None)->dict[str,Any]:

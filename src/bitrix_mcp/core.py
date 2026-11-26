@@ -83,7 +83,7 @@ READ_METHODS = frozenset({
     'profile', 'methods', 'user.get', 'user.search', 'tasks.task.get', 'tasks.task.list',
     'task.checklistitem.get', 'task.checklistitem.getlist', 'task.checklistitem.getmanifest',
     'task.commentitem.getlist', 'task.commentitem.get', 'task.item.getallowedactions',
-    'im.dialog.get', 'im.dialog.messages.get', 'im.recent.list', 'im.search.chat.list',
+    'im.dialog.get', 'im.dialog.messages.get', 'im.dialog.users.list', 'im.recent.list', 'im.search.chat.list',
     'im.disk.folder.get', 'disk.file.get', 'disk.attachedObject.get',
     'disk.storage.getlist', 'disk.folder.getchildren', 'tasks.task.getaccess',
 })
