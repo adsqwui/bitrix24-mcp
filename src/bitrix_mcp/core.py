@@ -93,7 +93,7 @@ WRITE_METHODS = frozenset({
     'task.checklistitem.add', 'task.checklistitem.update', 'task.checklistitem.delete',
     'task.checklistitem.complete', 'task.checklistitem.renew', 'task.checklistitem.moveafteritem',
     'task.commentitem.add', 'disk.folder.uploadfile',
-    'tasks.task.files.attach',
+    'tasks.task.files.attach', 'tasks.task.checklist.addAttachmentsFromDisk',
     'im.message.add', 'im.disk.file.commit', 'im.disk.file.upload',
     'tasks.task.chat.message.send',
 })

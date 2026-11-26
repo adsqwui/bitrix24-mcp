@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 
 from .core import AppError, Client, Settings
@@ -14,6 +15,10 @@ from .extras import ExtraTools
 from .tasks import TaskTools
 
 logging.getLogger("httpx").setLevel(logging.WARNING); logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+class ChecklistItem(BaseModel):
+    title:str
+    files:list[int|str]=Field(default_factory=list,description="ID файлов на Диске или локальные пути внутри MCP_ALLOWED_ROOTS")
 
 def compact(value:Any)->str:return json.dumps(value,ensure_ascii=False,separators=(",",":"),default=str)
 
@@ -73,7 +78,9 @@ def build_server(settings:Settings,client:Client|None=None)->FastMCP:
     @tool
     async def checklist_get(task_id:int)->str:return await safe("checklist_get",extra.checklist_get(task_id))
     @tool
-    async def checklist_add(task_id:int,titles:list[str],dry_run:bool=False)->str:return await safe("checklist_add",extra.checklist_add(task_id,titles,dry_run))
+    async def checklist_add(task_id:int,titles:list[str|ChecklistItem],dry_run:bool=False)->str:
+        """Добавить пункты. Пункт — строка или {"title": ..., "files": [...]}: файлы (ID на Диске или локальные пути) загружаются и крепятся к пункту в том же вызове."""
+        return await safe("checklist_add",extra.checklist_add(task_id,[x.model_dump() if isinstance(x,BaseModel) else x for x in titles],dry_run))
     @tool
     async def checklist_update(task_id:int,item_id:int,title:str,dry_run:bool=False)->str:return await safe("checklist_update",extra.checklist_update(task_id,item_id,title,dry_run))
     @tool
@@ -83,7 +90,9 @@ def build_server(settings:Settings,client:Client|None=None)->FastMCP:
     @tool
     async def checklist_reorder(task_id:int,item_ids:list[int],dry_run:bool=False)->str:return await safe("checklist_reorder",extra.checklist_reorder(task_id,item_ids,dry_run))
     @tool
-    async def checklist_attach(task_id:int,item_id:int,file_id:int,dry_run:bool=False)->str:return await safe("checklist_attach",extra.checklist_attach(task_id,item_id,file_id,dry_run=dry_run))
+    async def checklist_attach(task_id:int,item_id:int,files:list[int|str],dry_run:bool=False)->str:
+        """Прикрепить файлы к существующему пункту. files: ID файлов на Диске или локальные пути."""
+        return await safe("checklist_attach",extra.checklist_attach(task_id,item_id,files,dry_run))
     @tool
     async def comment_list(task_id:int,limit:int=50,cursor:int=0,include_system:bool=False)->str:return await safe("comment_list",extra.comment_list(task_id,limit,cursor,include_system))
     @tool

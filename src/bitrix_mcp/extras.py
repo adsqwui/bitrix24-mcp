@@ -22,11 +22,40 @@ class ExtraTools:
     def __init__(self, client:Client, tasks:TaskTools): self.client,self.tasks=client,tasks
     async def checklist_get(self,task_id:int)->dict[str,Any]:
         env=await self.client.call("task.checklistitem.getlist",{"TASKID":task_id}); return {**checklist_view(_items(env)),"task_url":self.tasks.task_url(task_id)}
-    async def checklist_add(self,task_id:int,titles:list[str],dry_run:bool=False)->dict[str,Any]:
-        if not titles or any(not x.strip() for x in titles): raise AppError("VALIDATION","Нужен непустой список пунктов.")
-        if dry_run:return {"dry_run":True,"operation":"checklist_add","titles":titles,"task_url":self.tasks.task_url(task_id)}
-        commands={f"add{i}":("task.checklistitem.add",{"TASKID":task_id,"FIELDS":{"TITLE":title}}) for i,title in enumerate(titles)}
-        result=await self.client.batch(commands,mutation=True); return {**result,"partial":bool(result["errors"]),"task_url":self.tasks.task_url(task_id)}
+    async def checklist_add(self,task_id:int,titles:list[str|Mapping[str,Any]],dry_run:bool=False)->dict[str,Any]:
+        # An item is a title or {"title": ..., "files": [Drive file id or local path, ...]}.
+        items=[(x,[]) if isinstance(x,str) else (str(x.get("title") or ""),list(x.get("files") or [])) for x in titles or []]
+        if not items or any(not title.strip() for title,_ in items): raise AppError("VALIDATION","Нужен непустой список пунктов.")
+        # Paths are checked before anything is written, so a bad path never leaves half a checklist.
+        files=[await self._check_files(f) for _,f in items]
+        if dry_run:return {"dry_run":True,"operation":"checklist_add","titles":[t for t,_ in items],**({"files":{f"add{i}":x for i,x in enumerate(files) if x}} if any(files) else {}),"task_url":self.tasks.task_url(task_id)}
+        commands={f"add{i}":("task.checklistitem.add",{"TASKID":task_id,"FIELDS":{"TITLE":title}}) for i,(title,_) in enumerate(items)}
+        result=await self.client.batch(commands,mutation=True)
+        attached,failed={},{}
+        for i,specs in enumerate(files):
+            key=f"add{i}"
+            if not specs or key not in result["successes"]: continue
+            try: attached[key]=await self._attach(task_id,int(result["successes"][key]),specs)
+            except AppError as e: failed[key]=e.as_dict()
+        out={**result,"partial":bool(result["errors"] or failed),"task_url":self.tasks.task_url(task_id)}
+        if any(files): out.update(attachments=attached,attachment_errors=failed)
+        return out
+    async def _check_files(self,files:list[int|str])->list[dict[str,Any]]:
+        out=[]
+        for f in files:
+            if isinstance(f,int) or str(f).strip().isdigit(): out.append({"file_id":int(f)})
+            else:
+                name=Path(str(f)).name
+                out.append({"path":str(f),"name":name,"size":(await self.file_upload(name,path=str(f),dry_run=True))["size"]})
+        return out
+    async def _attach(self,task_id:int,item_id:int,specs:list[dict[str,Any]])->dict[str,Any]:
+        ids=[s["file_id"] if "file_id" in s else (await self.file_upload(s["name"],path=s["path"],unique_name=True))["id"] for s in specs]
+        # Not in the REST reference (only the template twin is); checked live on the portal.
+        env=await self.client.call("tasks.task.checklist.addAttachmentsFromDisk",{"taskId":task_id,"checkListItemId":item_id,"filesIds":[f"n{i}" for i in ids]},mutation=True)
+        item=(env.get("result") or {}).get("checkListItem") if isinstance(env.get("result"),Mapping) else None
+        found=item.get("attachments") if isinstance(item,Mapping) else None
+        attached=sorted({int(str(v).removeprefix("n")) for v in (found.values() if isinstance(found,Mapping) else []) if str(v).removeprefix("n").isdigit()})
+        return {"item_id":item_id,"file_ids":ids,"item_attachments":attached}
     async def checklist_update(self,task_id:int,item_id:int,title:str,dry_run:bool=False)->dict[str,Any]:
         return await self._checkwrite("update",task_id,item_id,{"FIELDS":{"TITLE":title}},dry_run)
     async def checklist_toggle(self,task_id:int,item_id:int,complete:bool,dry_run:bool=False)->dict[str,Any]:
@@ -46,7 +75,11 @@ class ExtraTools:
             try: await self.client.call("task.checklistitem.moveafteritem",{"TASKID":task_id,"ITEMID":item,"AFTERITEMID":before},mutation=True); moved.append(item)
             except AppError as e:return {"partial":True,"moved":moved,"failed":{"item_id":item,"error":e.as_dict()},"task_url":self.tasks.task_url(task_id)}
         return {"partial":False,"moved":moved,"task_url":self.tasks.task_url(task_id)}
-    async def checklist_attach(self,*_:Any,**__:Any)->dict[str,Any]: raise AppError("CAPABILITY_UNVERIFIED","Документированного API вложений пункта чек-листа не найдено.")
+    async def checklist_attach(self,task_id:int,item_id:int,files:list[int|str],dry_run:bool=False)->dict[str,Any]:
+        if not files: raise AppError("VALIDATION","Нужен хотя бы один файл.")
+        specs=await self._check_files(files)
+        if dry_run:return {"dry_run":True,"operation":"checklist_attach","task_id":task_id,"item_id":item_id,"files":specs,"task_url":self.tasks.task_url(task_id)}
+        return {"applied":True,**await self._attach(task_id,item_id,specs),"task_url":self.tasks.task_url(task_id)}
     async def _task_chat(self,task_id:int)->int|None:
         # The new task card keeps comments in the task chat; legacy comment API stays empty there.
         env=await self.client.call("tasks.task.get",{"taskId":task_id,"select":["ID","CHAT_ID"]}); raw=env.get("result",{})
@@ -81,7 +114,7 @@ class ExtraTools:
         candidate=Path(path).expanduser().resolve(strict=not write)
         if not any(candidate==root or root in candidate.parents for root in self.client.settings.allowed_roots):raise AppError("PATH_DENIED","Путь вне разрешённых каталогов.")
         return candidate
-    async def file_upload(self,name:str,path:str|None=None,content_base64:str|None=None,folder_id:int|None=None,dry_run:bool=False)->dict[str,Any]:
+    async def file_upload(self,name:str,path:str|None=None,content_base64:str|None=None,folder_id:int|None=None,dry_run:bool=False,unique_name:bool=False)->dict[str,Any]:
         if (path is None)==(content_base64 is None):raise AppError("VALIDATION","Укажите ровно один источник: path или base64.")
         if not name.strip() or Path(name).name!=name:raise AppError("VALIDATION","Имя файла должно быть непустым и без компонентов пути.")
         folder=folder_id or self.client.settings.disk_folder_id
@@ -100,7 +133,9 @@ class ExtraTools:
             except binascii.Error:raise AppError("VALIDATION","Некорректный base64.") from None
             if len(data)>cap:raise AppError("FILE_LIMIT","Файл превышает лимит.")
             if dry_run:return {"dry_run":True,"operation":"file_upload","name":name,"size":len(data),"task_url":None}
-        env=await self.client.call("disk.folder.uploadfile",{"id":folder,"data":{"NAME":name},"fileContent":[name,base64.b64encode(data).decode()]},mutation=True); result=env.get("result",{})
+        params={"id":folder,"data":{"NAME":name},"fileContent":[name,base64.b64encode(data).decode()]}
+        if unique_name: params["generateUniqueName"]=True
+        env=await self.client.call("disk.folder.uploadfile",params,mutation=True); result=env.get("result",{})
         return {"id":int(result.get("ID") or result.get("id")),"name":name,"task_url":None}
     async def task_attach_files(self,task_id:int,file_ids:list[int],dry_run:bool=False)->dict[str,Any]:
         if dry_run:return {"dry_run":True,"operation":"task_attach_files","file_ids":file_ids,"task_url":self.tasks.task_url(task_id)}

@@ -152,3 +152,45 @@ async def test_mention_outside_chat_falls_back_to_portal_search(tmp_path):
 async def test_message_without_at_skips_member_lookup(tmp_path):
     f=Fake(tmp_path);await ExtraTools(f,TaskTools(f)).chat_send("chat7","без упоминаний")
     assert [c[0] for c in f.calls]==["im.message.add"]
+
+class BatchOk(Fake):
+    async def batch(self,c,mutation=False):self.calls.append(("batch",c,mutation));return {"successes":{k:100+i for i,k in enumerate(c)},"errors":{}}
+
+@pytest.mark.asyncio
+async def test_checklist_add_with_files_uploads_and_attaches(tmp_path):
+    shot=tmp_path/"s1.png";shot.write_bytes(b"png")
+    attach={"result":{"checkListItem":{"id":101,"attachments":{"6816":"n500","6817":"n7"}}}}
+    f=BatchOk(tmp_path,[{"result":{"ID":500}},attach]);r=await ExtraTools(f,TaskTools(f)).checklist_add(1,["Без файла",{"title":"Скрин","files":[str(shot),7]}])
+    names=[c[0] for c in f.calls]
+    assert names==["batch","disk.folder.uploadfile","tasks.task.checklist.addAttachmentsFromDisk"]
+    assert f.calls[1][1]["generateUniqueName"] is True
+    assert f.calls[2][1]=={"taskId":1,"checkListItemId":101,"filesIds":["n500","n7"]} and f.calls[2][2]
+    assert r["attachments"]=={"add1":{"item_id":101,"file_ids":[500,7],"item_attachments":[7,500]}} and r["partial"] is False
+
+@pytest.mark.asyncio
+async def test_checklist_add_bad_path_writes_nothing(tmp_path):
+    f=BatchOk(tmp_path)
+    with pytest.raises(AppError) as e:await ExtraTools(f,TaskTools(f)).checklist_add(1,[{"title":"x","files":["/etc/hosts"]}])
+    assert e.value.code=="PATH_DENIED" and not f.calls
+
+@pytest.mark.asyncio
+async def test_checklist_add_dry_run_lists_files(tmp_path):
+    shot=tmp_path/"s.png";shot.write_bytes(b"pn")
+    f=BatchOk(tmp_path);r=await ExtraTools(f,TaskTools(f)).checklist_add(1,[{"title":"x","files":[str(shot)]}],dry_run=True)
+    assert r["titles"]==["x"] and r["files"]=={"add0":[{"path":str(shot),"name":"s.png","size":2}]} and not f.calls
+
+@pytest.mark.asyncio
+async def test_checklist_add_attach_failure_is_partial(tmp_path):
+    class F(BatchOk):
+        async def call(self,m,p=None,mutation=False):
+            self.calls.append((m,p,mutation))
+            if m=="tasks.task.checklist.addAttachmentsFromDisk":raise AppError("UPSTREAM_ERROR","no")
+            return {"result":True}
+    f=F(tmp_path);r=await ExtraTools(f,TaskTools(f)).checklist_add(1,[{"title":"x","files":[5]}])
+    assert r["partial"] is True and r["attachment_errors"]["add0"]["code"]=="UPSTREAM_ERROR" and r["successes"]=={"add0":100}
+
+@pytest.mark.asyncio
+async def test_checklist_attach_existing_item(tmp_path):
+    f=Fake(tmp_path,[{"result":{"checkListItem":{"attachments":{"1":"n9"}}}}]);r=await ExtraTools(f,TaskTools(f)).checklist_attach(3,44,[9])
+    assert f.calls==[("tasks.task.checklist.addAttachmentsFromDisk",{"taskId":3,"checkListItemId":44,"filesIds":["n9"]},True)]
+    assert r["applied"] is True and r["item_attachments"]==[9]
