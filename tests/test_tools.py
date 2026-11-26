@@ -101,3 +101,23 @@ async def test_task_list_checklists_split_into_batches_of_50(tmp_path):
     f=F(tmp_path,[rows]);r=await TaskTools(f).task_list(limit=60)
     sizes=[len(c[1]) for c in f.calls if c[0]=="batch"]
     assert sizes==[50,10] and not any(t.get("checklist_unavailable") for t in r["tasks"])
+
+@pytest.mark.asyncio
+async def test_chat_send_by_title_resolves_exact_chat(tmp_path):
+    found={"result":[{"id":"76030","name":"Разработка. Правки","type":"chat"},{"id":"5","name":"Разработка. Правки (архив)","type":"chat"}]}
+    f=Fake(tmp_path,[found,{"result":321}]);r=await ExtraTools(f,TaskTools(f)).chat_send("разработка. правки","Привет")
+    assert f.calls[1][0]=="im.message.add" and f.calls[1][1]["DIALOG_ID"]=="chat76030"
+    assert r["message_id"]==321 and r["dialog_id"]=="chat76030"
+
+@pytest.mark.asyncio
+async def test_chat_send_by_title_not_found_lists_candidates(tmp_path):
+    found={"result":[{"id":"5","name":"Разработка. Правки (архив)","type":"chat"}]}
+    f=Fake(tmp_path,[found])
+    with pytest.raises(AppError) as e:await ExtraTools(f,TaskTools(f)).chat_send("Разработка. Правки","Привет")
+    assert e.value.code=="CHAT_NOT_FOUND" and e.value.details["candidates"][0]["dialog_id"]=="chat5"
+    assert all(c[0]!="im.message.add" for c in f.calls)
+
+@pytest.mark.asyncio
+async def test_chat_send_dialog_id_skips_lookup(tmp_path):
+    f=Fake(tmp_path);await ExtraTools(f,TaskTools(f)).chat_send("chat12","x")
+    assert [c[0] for c in f.calls]==["im.message.add"]

@@ -125,9 +125,21 @@ class ExtraTools:
         env=await self.client.call("im.search.chat.list",{"FIND":title,"OFFSET":offset,"LIMIT":min(limit,50)}); rows=_items(env)
         exact=[r for r in rows if str(r.get("name") or r.get("NAME")).casefold()==title.casefold()]
         return {"chats":[{"id":r.get("id") or r.get("ID"),"dialog_id":f"chat{r.get('id') or r.get('ID')}","name":r.get("name") or r.get("NAME"),"type":r.get("type") or r.get("TYPE")} for r in (exact or rows)],"next":offset+len(rows) if len(rows)==min(limit,50) else None,"task_url":None}
+    async def _dialog(self,target:str)->str:
+        # A dialog id (chat123, sg123, user id) passes as is; anything else is an exact chat title.
+        raw=str(target).strip()
+        if re.fullmatch(r"(chat|sg)?[1-9][0-9]*",raw):return raw
+        if not raw:raise AppError("VALIDATION","Укажите dialog_id или название чата.")
+        found=(await self.chat_find(raw))["chats"]
+        exact=[c for c in found if str(c["name"]).strip().casefold()==raw.casefold()]
+        if len(exact)!=1:
+            candidates=[{"dialog_id":c["dialog_id"],"name":c["name"]} for c in (exact or found)[:10]]
+            raise AppError("CHAT_AMBIGUOUS" if exact else "CHAT_NOT_FOUND","Чат с таким названием не найден однозначно; уточните название или передайте dialog_id.",{"candidates":candidates})
+        return exact[0]["dialog_id"]
     async def chat_send(self,dialog_id:str,message:str,dry_run:bool=False)->dict[str,Any]:
-        if dry_run:return {"dry_run":True,"operation":"chat_send","dialog_id":dialog_id,"message":message,"task_url":None}
-        env=await self.client.call("im.message.add",{"DIALOG_ID":dialog_id,"MESSAGE":message},mutation=True);return {"message_id":env.get("result"),"task_url":None}
+        target=await self._dialog(dialog_id)
+        if dry_run:return {"dry_run":True,"operation":"chat_send","dialog_id":target,"message":message,"task_url":None}
+        env=await self.client.call("im.message.add",{"DIALOG_ID":target,"MESSAGE":message},mutation=True);return {"message_id":env.get("result"),"dialog_id":target,"task_url":None}
     async def chat_history(self,dialog_id:str,last_n:int=20,last_id:int|None=None)->dict[str,Any]:
         params:dict[str,Any]={"DIALOG_ID":dialog_id,"LIMIT":min(last_n,50)}
         if last_id: params["LAST_ID"]=last_id

@@ -97,7 +97,9 @@ def build_server(settings:Settings,client:Client|None=None)->FastMCP:
     @tool
     async def chat_find(title:str,limit:int=50,offset:int=0)->str:return await safe("chat_find",extra.chat_find(title,limit,offset))
     @tool
-    async def chat_send(dialog_id:str,message:str,dry_run:bool=False)->str:return await safe("chat_send",extra.chat_send(dialog_id,message,dry_run))
+    async def chat_send(dialog_id:str,message:str,dry_run:bool=False)->str:
+        """Отправить сообщение в чат. dialog_id: chat123, sg123, ID пользователя или точное название чата."""
+        return await safe("chat_send",extra.chat_send(dialog_id,message,dry_run))
     @tool
     async def chat_history(dialog_id:str,last_n:int=20)->str:return await safe("chat_history",extra.chat_history(dialog_id,last_n))
     @tool

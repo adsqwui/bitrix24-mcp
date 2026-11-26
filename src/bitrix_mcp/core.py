@@ -182,7 +182,8 @@ class Client:
                  'BATCH_INVALID', 'VALIDATION', 'USER_AMBIGUOUS', 'USER_NOT_FOUND',
                  'INVALID_DATE', 'PATH_DENIED', 'FILE_LIMIT', 'FILE_EXISTS',
                  'UNSAFE_URL', 'DOWNLOAD_FAILED', 'CONFIG_INVALID',
-                 'CAPABILITY_UNVERIFIED', 'INTERNAL_ERROR', 'WEBHOOK_INVALID', 'TASK_NOT_FOUND'}
+                 'CAPABILITY_UNVERIFIED', 'INTERNAL_ERROR', 'WEBHOOK_INVALID', 'TASK_NOT_FOUND',
+                 'CHAT_NOT_FOUND', 'CHAT_AMBIGUOUS'}
         safe: dict[str, Any] = {}
         if metadata.get('method') in methods: safe['method'] = metadata['method']
         if metadata.get('code') in codes: safe['code'] = metadata['code']
