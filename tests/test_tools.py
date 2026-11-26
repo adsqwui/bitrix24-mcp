@@ -194,3 +194,27 @@ async def test_checklist_attach_existing_item(tmp_path):
     f=Fake(tmp_path,[{"result":{"checkListItem":{"attachments":{"1":"n9"}}}}]);r=await ExtraTools(f,TaskTools(f)).checklist_attach(3,44,[9])
     assert f.calls==[("tasks.task.checklist.addAttachmentsFromDisk",{"taskId":3,"checkListItemId":44,"filesIds":["n9"]},True)]
     assert r["applied"] is True and r["item_attachments"]==[9]
+
+URL_PREFIX="https://example.bitrix24.ru/company/personal/user/1001/tasks/task/view/"
+
+@pytest.mark.asyncio
+async def test_task_tag_becomes_link_with_title(tmp_path):
+    class F(Fake):
+        async def batch(self,c,mutation=False):
+            self.calls.append(("batch",c,mutation));return {"successes":{"t90958":{"task":{"id":"90958","title":"Правки [сайт]"}}},"errors":{"t5":{"code":"X"}}}
+    f=F(tmp_path);r=await ExtraTools(f,TaskTools(f)).chat_send("chat1","См. [TASK=90958] и [task=5]",dry_run=True)
+    assert r["message"]==f"См. [URL={URL_PREFIX}90958/]Правки (сайт) (#90958)[/URL] и [URL={URL_PREFIX}5/]задача #5[/URL]"
+    assert f.calls[0]==("batch",{"t5":("tasks.task.get",{"taskId":5,"select":["ID","TITLE"]}),"t90958":("tasks.task.get",{"taskId":90958,"select":["ID","TITLE"]})},False)
+
+@pytest.mark.asyncio
+async def test_task_number_after_word_becomes_link(tmp_path):
+    f=Fake(tmp_path);r=await ExtraTools(f,TaskTools(f)).chat_send("chat1","Закрыл задачу №90958, по задаче 91000 вопрос. Счёт 12345 не трогаю",dry_run=True)
+    assert r["message"]==f"Закрыл задачу [URL={URL_PREFIX}90958/]№90958[/URL], по задаче [URL={URL_PREFIX}91000/]91000[/URL] вопрос. Счёт 12345 не трогаю"
+    assert not f.calls
+
+@pytest.mark.asyncio
+async def test_untitled_task_tag_is_not_linked_twice(tmp_path):
+    class F(Fake):
+        async def batch(self,c,mutation=False):return {"successes":{},"errors":{"t90958":{"code":"X"}}}
+    f=F(tmp_path);r=await ExtraTools(f,TaskTools(f)).chat_send("chat1","[TASK=90958]",dry_run=True)
+    assert r["message"]==f"[URL={URL_PREFIX}90958/]задача #90958[/URL]"

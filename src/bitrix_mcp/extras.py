@@ -12,6 +12,10 @@ from .tasks import TaskTools, _items, checklist_view
 # "@Полина" or "@Полина Иванова"; the lookbehind keeps e-mail addresses out.
 MENTION_RE=re.compile(r"(?<![\w.@])@([^\W\d_][\w-]*)(?:[ \t]+([^\W\d_][\w-]*))?")
 
+# Chat BB-code has no task tag, so [TASK=90958] and "задача 90958" become [URL] links.
+TASK_TAG_RE=re.compile(r"\[TASK=([1-9][0-9]*)\]",re.I)
+TASK_WORD_RE=re.compile(r"(?i)(?<![\w\[=/])(задач(?:а|и|е|у|ей|ам|ами|ах)?)(\s+)(№\s?|#)?([1-9][0-9]{2,})\b")
+
 async def _asub(pattern:re.Pattern[str],text:str,repl)->str:
     out=[];pos=0
     for m in pattern.finditer(text):
@@ -210,9 +214,28 @@ class ExtraTools:
                 except AppError:pass
             return f"[USER={await lookup(first,'@'+first)}]{first}[/USER]"+tail
         return await _asub(MENTION_RE,text,repl) if "@" in text else text
+    async def _task_links(self,text:str)->str:
+        ids={int(x) for x in TASK_TAG_RE.findall(text)}
+        titles:dict[int,str]={}
+        if ids:
+            commands={f"t{i}":("tasks.task.get",{"taskId":i,"select":["ID","TITLE"]}) for i in sorted(ids)[:50]}
+            try:found=(await self.client.batch(commands))["successes"]
+            except AppError:found={}
+            for key,value in found.items():
+                task=value.get("task",value) if isinstance(value,Mapping) else {}
+                title=(task.get("title") or task.get("TITLE")) if isinstance(task,Mapping) else None
+                # Square brackets in a title would close the [URL] tag early.
+                if title:titles[int(key[1:])]=str(title).replace("[","(").replace("]",")")
+        def tag(m:re.Match[str])->str:
+            tid=int(m.group(1));label=f"{titles[tid]} (#{tid})" if tid in titles else f"задача #{tid}"
+            return f"[URL={self.tasks.task_url(tid)}]{label}[/URL]"
+        def word(m:re.Match[str])->str:
+            return f"{m.group(1)}{m.group(2)}[URL={self.tasks.task_url(m.group(4))}]{m.group(3) or ''}{m.group(4)}[/URL]"
+        # Words first: the "задача #id" label of an untitled tag must not be linked twice.
+        return TASK_TAG_RE.sub(tag,TASK_WORD_RE.sub(word,text))
     async def chat_send(self,dialog_id:str,message:str,dry_run:bool=False)->dict[str,Any]:
         target=await self._dialog(dialog_id)
-        message=await self._mentions(target,message)
+        message=await self._task_links(await self._mentions(target,message))
         if dry_run:return {"dry_run":True,"operation":"chat_send","dialog_id":target,"message":message,"task_url":None}
         env=await self.client.call("im.message.add",{"DIALOG_ID":target,"MESSAGE":message},mutation=True);return {"message_id":env.get("result"),"dialog_id":target,"task_url":None}
     async def chat_history(self,dialog_id:str,last_n:int=20,last_id:int|None=None)->dict[str,Any]:

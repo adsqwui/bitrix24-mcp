@@ -108,7 +108,8 @@ def build_server(settings:Settings,client:Client|None=None)->FastMCP:
     @tool
     async def chat_send(dialog_id:str,message:str,dry_run:bool=False)->str:
         """Отправить сообщение в чат. dialog_id: chat123, sg123, ID пользователя или точное название чата.
-        @Имя или @Имя Фамилия превращаются в упоминание [USER=id]: сначала среди участников чата, потом по порталу."""
+        @Имя или @Имя Фамилия превращаются в упоминание [USER=id]: сначала среди участников чата, потом по порталу.
+        [TASK=123] становится ссылкой с названием задачи, «задача 123» — ссылкой на номер."""
         return await safe("chat_send",extra.chat_send(dialog_id,message,dry_run))
     @tool
     async def chat_history(dialog_id:str,last_n:int=20)->str:return await safe("chat_history",extra.chat_history(dialog_id,last_n))
